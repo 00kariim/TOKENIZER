@@ -55,6 +55,16 @@ public class SecurityConfig {
                         "/actuator/health/liveness",
                         "/actuator/health/readiness"
                 ).permitAll()
+                // Swagger UI + OpenAPI spec — open for developer access.
+                .requestMatchers(
+                        "/swagger-ui.html",
+                        "/swagger-ui/**",
+                        "/v3/api-docs",
+                        "/v3/api-docs/**",
+                        "/v3/api-docs.yaml"
+                ).permitAll()
+                // RSA public key — must be accessible by Flutter without a token.
+                .requestMatchers("/api/v1/mdes/publicKey").permitAll()
                 // All other /api/** endpoints require a valid JWT.
                 .requestMatchers("/api/**").authenticated()
                 // Deny anything else.

@@ -3,7 +3,7 @@
 # Uses a full JDK image with Maven to compile and package the application.
 # The fat JAR is then copied to a lean runtime image.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jdk-alpine AS builder
+FROM maven:3.9-eclipse-temurin-21-alpine AS builder
 
 WORKDIR /workspace
 

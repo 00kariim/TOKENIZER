@@ -14,9 +14,9 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ─── token_vault ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS token_vault (
     token_id             UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    token_value          CHAR(16)     NOT NULL UNIQUE,
+    token_value          VARCHAR(16)  NOT NULL UNIQUE,
     pan_unique_reference VARCHAR(64)  NOT NULL,
-    token_expiry         CHAR(4)      NOT NULL,
+    token_expiry         VARCHAR(4)   NOT NULL,
     wallet_id            VARCHAR(20)  NOT NULL,
     token_requestor_id   VARCHAR(30)  NOT NULL,
     device_id            VARCHAR(128),

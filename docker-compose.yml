@@ -1,0 +1,93 @@
+services:
+
+  # ─── Shared PostgreSQL (mdes_vault_db + saham_core_db) ───────────────────────
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       mdes_vault_db
+      POSTGRES_USER:     mdes_user
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - db_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mdes_user -d mdes_vault_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── MDES — TSP Simulator ────────────────────────────────────────────────────
+  # Swagger UI:  http://localhost:8081/swagger-ui.html
+  # API docs:    http://localhost:8081/v3/api-docs
+  # Public key:  http://localhost:8081/api/v1/mdes/publicKey
+  MDES:
+    image: simulator/mdes:latest
+    build:
+      context: ./MDES
+      dockerfile: Dockerfile
+    container_name: MDES
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL:      jdbc:postgresql://postgres-db:5432/mdes_vault_db
+      SPRING_DATASOURCE_USERNAME: mdes_user
+      SPRING_DATASOURCE_PASSWORD: ${MDES_DB_PASSWORD}
+      INTERNAL_JWT_SECRET:        ${INTERNAL_JWT_SECRET}
+      PAN_ENCRYPTION_KEY:         ${PAN_ENCRYPTION_KEY}
+      CORE_BANKING_BASE_URL:      ${CORE_BANKING_BASE_URL:-http://CORE-BANKING:8082}
+      TSP_RSA_PRIVATE_KEY_PATH:   ${TSP_RSA_PRIVATE_KEY_PATH}
+      TSP_RSA_PUBLIC_KEY_PATH:    ${TSP_RSA_PUBLIC_KEY_PATH}
+      SERVER_PORT:                8081
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks:
+      - services_net
+      - db_net
+
+  # ─── CORE-BANKING — Core Banking Simulator ───────────────────────────────────
+  # Swagger UI:  http://localhost:8082/swagger-ui.html
+  # API docs:    http://localhost:8082/v3/api-docs
+  # NOTE: In production, remove the ports block below — Core Banking should only
+  #       be reachable from MDES over services_net.
+  CORE-BANKING:
+    image: simulator/core-banking:latest
+    build:
+      context: ./CORE-BANKING
+      dockerfile: Dockerfile
+    container_name: CORE-BANKING
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL:      jdbc:postgresql://postgres-db:5432/saham_core_db
+      SPRING_DATASOURCE_USERNAME: core_user
+      SPRING_DATASOURCE_PASSWORD: ${CORE_DB_PASSWORD}
+      INTERNAL_JWT_SECRET:        ${INTERNAL_JWT_SECRET}
+      PAN_ENCRYPTION_KEY:         ${PAN_ENCRYPTION_KEY}
+      SERVER_PORT:                8082
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks:
+      - services_net
+      - db_net
+
+networks:
+  services_net:
+    driver: bridge
+
+  db_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:

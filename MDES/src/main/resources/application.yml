@@ -4,7 +4,7 @@ spring:
 
   # ─── PostgreSQL / JPA ────────────────────────────────────────────────────────
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/mdes_vault_db}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres-db:5432/mdes_vault_db}
     username: ${SPRING_DATASOURCE_USERNAME:mdes_user}
     password: ${SPRING_DATASOURCE_PASSWORD:changeme}
     driver-class-name: org.postgresql.Driver
@@ -57,16 +57,32 @@ management:
 internal:
   jwt:
     secret: ${INTERNAL_JWT_SECRET:change-me-in-production-min-32chars}
+    ttl-minutes: 5      # Spec §8.2: short-lived JWTs, 5-minute TTL
 
 # Base64-encoded 32-byte AES-256 master key for token symmetric key encryption at rest.
 pan:
   encryption:
-    key: ${PAN_ENCRYPTION_KEY:Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tMzJieQ==}
+    key: ${PAN_ENCRYPTION_KEY:Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tMzJieXRlcyE=}
 
 # Base URL for Core Banking Feign client.
 core:
   banking:
     base-url: ${CORE_BANKING_BASE_URL:http://core-banking:8082}
+
+# TSP RSA-2048 key pair for PAN payload decryption.
+# Flutter RSA-OAEP encrypts the PAN before sending; MDES decrypts it here.
+# If files are absent on startup, a fresh pair is generated (simulator mode).
+tsp:
+  rsa:
+    private-key-path: ${TSP_RSA_PRIVATE_KEY_PATH:/app/certs/tsp_private.pem}
+    public-key-path:  ${TSP_RSA_PUBLIC_KEY_PATH:/app/certs/tsp_public.pem}
+
+# Token defaults (spec §10.2)
+mdes:
+  token:
+    default-expiry-months: 36   # expressed as MMYY in generated token (runtime-computed)
+    otp-ttl-minutes: 10
+    max-otp-attempts: 3
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging:

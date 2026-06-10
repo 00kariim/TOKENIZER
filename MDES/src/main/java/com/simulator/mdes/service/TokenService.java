@@ -56,6 +56,7 @@ public class TokenService {
     private final CryptogramKeyRepository    keyRepository;
     private final CoreBankingClient          coreBankingClient;
     private final CryptogramService          cryptogramService;
+    private final PanDecryptionService       panDecryptionService;  // RSA PAN decryption
 
     /**
      * In-memory cache for pending activations (panUniqueReference → bank response).
@@ -80,16 +81,33 @@ public class TokenService {
      * @throws TokenizationException   if Core Banking denies the request
      */
     public List<ActivationMethod> initiateProvisioning(TokenizationRequest request) {
-        // Guard: prevent duplicate active tokens for same card + device.
+        // 1. Decrypt the PAN payload from Flutter (RSA-OAEP + AES-GCM or dev-mode passthrough).
+        //    The PanPayload is held transiently in this stack frame and never stored or logged.
+        PanDecryptionService.PanPayload panPayload = panDecryptionService.decrypt(
+                request.encryptedData(),
+                request.encryptedKey()
+        );
+
+        // 2. Derive panUniqueReference from the PAN if not supplied by Flutter.
+        //    In the full flow, Flutter sends the panUniqueReference it receives from the
+        //    tokenize response. Here we derive it server-side from the decrypted PAN
+        //    using a deterministic UUID-v5 style hash (SHA-256 truncated to UUID form).
+        String panUniqueReference = request.panUniqueReference() != null && !request.panUniqueReference().isBlank()
+                ? request.panUniqueReference()
+                : derivePanUniqueReference(panPayload.pan());
+
+        // PAN discarded here — panUniqueReference is the only cross-service identifier.
+
+        // 3. Guard: prevent duplicate active tokens for same card + device.
         boolean alreadyExists = vaultRepository.existsByPanUniqueReferenceAndDeviceIdAndStatus(
-                request.panUniqueReference(), request.deviceId(), "ACTIVE");
+                panUniqueReference, request.deviceId(), "ACTIVE");
         if (alreadyExists) {
             throw new DuplicateTokenException(
                     "An active token already exists for this card and device: " + request.deviceId());
         }
 
-        // Call Core Banking authorizeService.
-        AuthorizeServiceRequest bankRequest = buildAuthorizeServiceRequest(request);
+        // 4. Call Core Banking authorizeService.
+        AuthorizeServiceRequest bankRequest = buildAuthorizeServiceRequest(request, panUniqueReference);
         AuthorizeServiceResponse bankResponse = coreBankingClient.authorizeService(bankRequest);
         AuthorizeServiceResult result = bankResponse.authorizeServiceResponse();
 
@@ -98,9 +116,9 @@ public class TokenService {
             throw new TokenizationException("ID&V failed — bank decision: " + result.decision());
         }
 
-        // Cache the activation data for the subsequent activate call.
-        pendingActivations.put(request.panUniqueReference(), result);
-        log.info("Provisioning initiated for panRef={}", request.panUniqueReference());
+        // 5. Cache the activation data for the subsequent activate call.
+        pendingActivations.put(panUniqueReference, result);
+        log.info("Provisioning initiated for panRef={}", panUniqueReference);
 
         return result.activationMethods();
     }
@@ -251,11 +269,28 @@ public class TokenService {
         return (10 - (sum % 10)) % 10;
     }
 
-    private AuthorizeServiceRequest buildAuthorizeServiceRequest(TokenizationRequest req) {
+    private String derivePanUniqueReference(String pan) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(pan.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // Format first 16 bytes as UUID-like string (opaque, non-reversible without key).
+            return String.format("%08x-%04x-%04x-%04x-%012x",
+                    java.nio.ByteBuffer.wrap(hash, 0, 4).getInt() & 0xFFFFFFFFL,
+                    java.nio.ByteBuffer.wrap(hash, 4, 2).getShort() & 0xFFFFL,
+                    java.nio.ByteBuffer.wrap(hash, 6, 2).getShort() & 0xFFFFL,
+                    java.nio.ByteBuffer.wrap(hash, 8, 2).getShort() & 0xFFFFL,
+                    java.nio.ByteBuffer.wrap(hash, 8, 8).getLong() & 0xFFFFFFFFFFFFL
+            );
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
+    }
+
+    private AuthorizeServiceRequest buildAuthorizeServiceRequest(TokenizationRequest req, String panUniqueReference) {
         return new AuthorizeServiceRequest(new AuthorizeServicePayload(
                 UUID.randomUUID().toString(),
                 req.tokenRequestorId(),
-                req.panUniqueReference(),
+                panUniqueReference,
                 new FundingAccountInfo(new EncryptedPayload(
                         req.encryptedData(), req.publicKeyFingerprint(), req.encryptedKey()
                 )),
