@@ -146,7 +146,7 @@ erDiagram
 
 
 
-    | Layer    | Technology         |
+| Layer    | Technology             |
 | -------- | ---------------------- |
 | Mobile   | Flutter 3              |
 | Backend  | Spring Boot 3          |
@@ -154,6 +154,7 @@ erDiagram
 | Gateway  | Nginx                  |
 | Security | JWT / AES / RSA / HMAC |
 | Infra    | Docker Compose         |
+
 
 
 
